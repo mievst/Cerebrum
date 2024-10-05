@@ -1,0 +1,61 @@
+version: '3'
+services:
+  rabbitmq:
+    image: 'rabbitmq:3-management'
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  middleware_service:
+    build: ./middleware
+    ports:
+      - "5000:5000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+      - REDIS_HOST=redis
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "sleep 20 && python service.py"]  # Задержка перед запуском
+
+  math_worker:
+    build: ./math_worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy  # Проверка готовности RabbitMQ
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "sleep 20 && python worker.py"]  # Задержка перед запуском
+    scale: 1  # Количество воркеров
+
+  string_worker:
+    build: ./string_worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy  # Проверка готовности RabbitMQ
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "sleep 20 && python worker.py"]  # Задержка перед запуском
+    scale: 1  # Количество воркеров
