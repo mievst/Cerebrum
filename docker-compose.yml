@@ -27,6 +27,8 @@ services:
     build: ./middleware
     ports:
       - "5000:5000"
+    volumes:
+      - ./files:/files:rw  # Для хранения файлов
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -51,6 +53,19 @@ services:
 
   string_worker:
     build: ./string_worker
+    depends_on:
+      rabbitmq:
+        condition: service_healthy  # Проверка готовности RabbitMQ
+    environment:
+      - RABBITMQ_HOST=rabbitmq
+    restart: unless-stopped
+    entrypoint: ["sh", "-c", "sleep 20 && python worker.py"]  # Задержка перед запуском
+    scale: 1  # Количество воркеров
+
+  video_worker:
+    build: ./video_worker
+    volumes:
+      - ./files:/files:rw  # Для хранения файлов
     depends_on:
       rabbitmq:
         condition: service_healthy  # Проверка готовности RabbitMQ

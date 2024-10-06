@@ -1,6 +1,8 @@
 import pika
 import json
 import time
+from moviepy.editor import VideoFileClip
+import os
 
 class Worker:
     def __init__(self, queue_name, host='rabbitmq', process_function=None):
@@ -44,13 +46,17 @@ class Worker:
 
 # Пример обработки строковых задач
 def process_string_task(task):
-    time.sleep(10)
-    task['text'] = task['text'].upper()
+    video = VideoFileClip(task['video'])
+    duration = video.duration
+    task['duration'] = duration
+    new_video = task["video"].replace('.mp4', '_processed.mp4')
+    video.write_videofile(new_video)
+    task["video"] = new_video
     return task
 
 # Запуск воркеров
 if __name__ == '__main__':
-    string_worker = Worker('string_queue', process_function=process_string_task)
+    string_worker = Worker('video_queue', process_function=process_string_task)
 
     # Воркеры можно запускать в отдельных процессах
     string_worker.start()

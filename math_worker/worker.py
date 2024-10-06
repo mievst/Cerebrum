@@ -15,6 +15,7 @@ class Worker:
     def callback(self, ch, method, properties, body):
         task = json.loads(body)
         print(f"Received task: {task}")
+        ch.basic_ack(delivery_tag=method.delivery_tag)
 
         # Обрабатываем задачу через функцию
         if self.process_function:
@@ -31,8 +32,6 @@ class Worker:
                 delivery_mode=2  # Make the message persistent
             )
         )
-
-        ch.basic_ack(delivery_tag=method.delivery_tag)
 
     def start(self):
         self.channel.basic_qos(prefetch_count=1)

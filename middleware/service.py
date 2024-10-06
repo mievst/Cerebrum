@@ -1,10 +1,43 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import pika
 import redis
 import json
 import uuid
 from threading import Thread
 import time
+import os
+
+
+UPLOAD_FOLDER = '/files'
+
+FILE_TIME_LIMIT = 24 * 60 * 60  # 24 часа
+
+def delete_old_files():
+    """
+    Функция удаляет файлы, которые старше TIME_LIMIT
+    """
+    current_time = time.time()
+
+    # Проходим по всем файлам в директории
+    for filename in os.listdir(UPLOAD_FOLDER):
+        file_path = os.path.join(UPLOAD_FOLDER, filename)
+
+        if os.path.isfile(file_path):
+            # Время последнего изменения файла
+            file_mtime = os.path.getmtime(file_path)
+
+            # Если файл старше заданного времени, удаляем его
+            if current_time - file_mtime > FILE_TIME_LIMIT:
+                print(f"Deleting old file: {file_path}")
+                os.remove(file_path)
+
+def run_cleanup_scheduler(interval=3600):
+    """
+    Запускает процесс очистки старых файлов каждый `interval` секунд (по умолчанию раз в час)
+    """
+    while True:
+        delete_old_files()
+        time.sleep(interval)
 
 
 class MiddlewareService:
@@ -86,6 +119,33 @@ class MiddlewareService:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
 
     def _setup_routes(self):
+        @self.app.route('/upload_file', methods=['POST'])
+        def upload_file():
+            if 'file' not in request.files:
+                return jsonify({'error': 'No file part'}), 400
+            file = request.files['file']
+            if file.filename == '':
+                return jsonify({'error': 'No selected file'}), 400
+
+            filename = f"{uuid.uuid4()}_{file.filename}"
+            file_path = os.path.join(UPLOAD_FOLDER, filename)
+            file.save(file_path)
+
+            return jsonify({'file_url': file_path}), 201
+
+        @self.app.route('/get_file', methods=['GET'])
+        def get_file():
+            file_url = request.args.get('file_url')
+            # Проверяем, что параметр существует и файл по указанному пути доступен
+            if file_url:
+                try:
+                    # Отправляем файл
+                    return send_file(file_url)
+                except FileNotFoundError:
+                    return f"File not found {file_url} {os.path.exists(file_url)}", 404
+            else:
+                return "No file_url provided", 400
+
         @self.app.route('/submit_task', methods=['POST'])
         def submit_task():
             task = request.json
@@ -150,5 +210,7 @@ class MiddlewareService:
 
 # Использование:
 if __name__ == '__main__':
+    cleanup_thread = Thread(target=run_cleanup_scheduler, daemon=True)
+    cleanup_thread.start()
     middleware = MiddlewareService()
     middleware.run()
