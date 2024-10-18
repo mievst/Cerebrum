@@ -1,0 +1,44 @@
+## Ignore Visual Studio files
+*.vs/
+*.vscode/
+
+## Ignore build and debug files
+bin/
+obj/
+Debug/
+Release/
+
+## Ignore NuGet packages
+packages/
+
+## Ignore .NET Core files
+.runtimeconfig.json
+appsettings.json
+
+## Ignore other files
+*.user
+*.suo
+*.ntvs*
+*.nupkg
+*.vsix
+*.sln.docstates
+
+## Ignore Resharper files
+*.resharper/
+*_ReSharper.*
+
+## Ignore TeamCity files
+_TeamCity*
+
+## Ignore dotCover files
+*.dotCover
+
+## Ignore NUnit files
+*.nunit
+
+## Ignore Visual Studio Code files
+.vscode/
+
+## Ignore other IDEs
+*.idea/
+*. Rider/

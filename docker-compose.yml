@@ -23,6 +23,18 @@ services:
       timeout: 10s
       retries: 5
 
+  postgres:
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydb
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data
+
   middleware_service:
     build: ./middleware
     ports:
@@ -37,11 +49,15 @@ services:
     environment:
       - RABBITMQ_HOST=rabbitmq
       - REDIS_HOST=redis
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydb
     restart: unless-stopped
     entrypoint: ["sh", "-c", "sleep 20 && python service.py"]  # Задержка перед запуском
 
-  math_worker:
-    build: ./math_worker
+  python_worker_example:
+    build: ./workers/python_worker_example
     depends_on:
       rabbitmq:
         condition: service_healthy  # Проверка готовности RabbitMQ
@@ -51,19 +67,21 @@ services:
     entrypoint: ["sh", "-c", "sleep 20 && python worker.py"]  # Задержка перед запуском
     scale: 1  # Количество воркеров
 
-  string_worker:
-    build: ./string_worker
+  csharp_worker_example:
+    build:
+      context: ./workers/csharp_worker_example
+      target: final
     depends_on:
       rabbitmq:
         condition: service_healthy  # Проверка готовности RabbitMQ
     environment:
       - RABBITMQ_HOST=rabbitmq
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "sleep 20 && python worker.py"]  # Задержка перед запуском
+    entrypoint: ["sh", "-c", "sleep 20 && dotnet CsharpWorkerExample.dll"]  # Задержка перед запуском
     scale: 1  # Количество воркеров
 
-  video_worker:
-    build: ./video_worker
+  video_worker_example:
+    build: ./workers/video_worker_example
     volumes:
       - ./files:/files:rw  # Для хранения файлов
     depends_on:

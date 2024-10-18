@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "CsharpWorkerExample": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
