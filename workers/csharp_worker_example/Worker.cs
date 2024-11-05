@@ -1,182 +1,65 @@
-using RabbitMQ.Client;
-using RabbitMQ.Client.Events;
-using RabbitMQ.Client.Exceptions;
-using System.Text;
-using Newtonsoft.Json;
+using StackExchange.Redis;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Threading.Tasks;
 
-public class Worker : IDisposable
+public class Worker
 {
-    private IConnection? _connection;
-    private IModel? _channel;
-    private readonly string _queueName;
-    private readonly string _hostName;
-    private readonly Func<object, object>? _processFunction;
-    private bool _isRunning;
-    private const int RECONNECT_INTERVAL = 5000; // 5 seconds
-    private readonly object _lockObject = new object();
+    private readonly ConnectionMultiplexer redis;
+    private readonly IDatabase db;
+    private readonly string queueName;
+    private readonly Func<JObject, Task<JObject>> processFunction;
+    private readonly TimeSpan resultExpiry;
 
-    public Worker(string queueName, string host = "rabbitmq", Func<object, object>? processFunction = null)
+    public Worker(string queueName, Func<JObject, Task<JObject>> processFunction, string redisHost = "localhost", int redisPort = 6379, int resultExpiryInSeconds = 86400)
     {
-        _queueName = queueName;
-        _hostName = host;
-        _processFunction = processFunction;
-        _isRunning = false;
+        this.redis = ConnectionMultiplexer.Connect($"{redisHost}:{redisPort}");
+        this.db = redis.GetDatabase();
+        this.queueName = queueName;
+        this.processFunction = processFunction;
+        this.resultExpiry = TimeSpan.FromSeconds(resultExpiryInSeconds);
     }
 
-    private bool TryConnect()
+    public async Task StartAsync()
     {
-        try
-        {
-            if (_connection?.IsOpen ?? false) return true;
-
-            var factory = new ConnectionFactory
-            {
-                HostName = _hostName,
-                AutomaticRecoveryEnabled = true,
-                NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
-            };
-
-            _connection = factory.CreateConnection();
-            _channel = _connection.CreateModel();
-
-            // Declare the queue that the worker will listen to
-            _channel.QueueDeclare(
-                queue: _queueName,
-                durable: true,
-                exclusive: false,
-                autoDelete: false,
-                arguments: null);
-
-            _channel.BasicQos(0, 1, false);
-
-            Console.WriteLine("Successfully connected to RabbitMQ");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Failed to connect to RabbitMQ: {ex.Message}");
-            return false;
-        }
-    }
-
-    private void HandleMessage(object? sender, BasicDeliverEventArgs ea)
-    {
-        try
-        {
-            var body = ea.Body.ToArray();
-            var message = Encoding.UTF8.GetString(body);
-            var task = JsonConvert.DeserializeObject<JObject>(message);
-
-            Console.WriteLine($"Received task: {message}");
-
-            object? result = null;
-            if (_processFunction != null && task != null)
-            {
-                result = _processFunction(task);
-                Console.WriteLine($"Processed task result: {JsonConvert.SerializeObject(result)}");
-            }
-
-            var resultMessage = JsonConvert.SerializeObject(result, new JsonSerializerSettings
-            {
-                NullValueHandling = NullValueHandling.Ignore
-            });
-            var resultBody = Encoding.UTF8.GetBytes(resultMessage);
-
-            var properties = _channel?.CreateBasicProperties();
-            if (properties != null)
-            {
-                properties.MessageId = task?["task_id"]?.ToString();
-                properties.ContentType = "application/json";
-                properties.DeliveryMode = 2; // Persistent
-
-                _channel?.BasicPublish(
-                    exchange: "",
-                    routingKey: "results",
-                    basicProperties: properties,
-                    body: resultBody);
-            }
-
-            _channel?.BasicAck(ea.DeliveryTag, false);
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error processing message: {ex.Message}");
-            // Reject message and requeue it
-            _channel?.BasicNack(ea.DeliveryTag, false, true);
-        }
-    }
-
-    public void Start()
-    {
-        _isRunning = true;
-
-        while (_isRunning)
+        Console.WriteLine($"Worker started and waiting for tasks in {queueName}. To exit, press CTRL+C.");
+        while (true)
         {
             try
             {
-                if (!TryConnect())
+                // Получение задачи из очереди
+                var taskData = await db.ListLeftPopAsync(queueName);
+                if (taskData.IsNullOrEmpty)
                 {
-                    Console.WriteLine($"Connection failed. Retrying in {RECONNECT_INTERVAL/1000} seconds...");
-                    Thread.Sleep(RECONNECT_INTERVAL);
+                    await Task.Delay(500); // если задач нет, подождать
                     continue;
                 }
 
-                var consumer = new EventingBasicConsumer(_channel);
-                consumer.Received += HandleMessage;
-                consumer.Shutdown += (sender, ea) =>
-                {
-                    Console.WriteLine("Consumer shutdown. Attempting to reconnect...");
-                };
-                consumer.ConsumerCancelled += (sender, ea) =>
-                {
-                    Console.WriteLine("Consumer cancelled. Attempting to reconnect...");
-                };
+                // Десериализация задачи в JObject
+                var task = JObject.Parse(taskData);
+                Console.WriteLine($"Received task: {taskData}");
 
-                _channel?.BasicConsume(
-                    queue: _queueName,
-                    autoAck: false,
-                    consumer: consumer);
+                // Обработка задачи через переданную функцию
+                var result = await processFunction(task);
+                Console.WriteLine($"Processed task result: {result}");
 
-                Console.WriteLine($"Waiting for tasks in {_queueName}. To exit press CTRL+C");
-
-                // Keep checking connection status
-                while (_isRunning && (_connection?.IsOpen ?? false))
-                {
-                    Thread.Sleep(1000);
-                }
-
-                if (_isRunning)
-                {
-                    Console.WriteLine("Connection lost. Attempting to reconnect...");
-                }
+                // Сохранение результата
+                string taskId = task["task_id"]?.ToString() ?? Guid.NewGuid().ToString();
+                await SaveResultAsync(taskId, result);
+                Console.WriteLine($"Result for task_id {taskId} saved to Redis.");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error in consumer loop: {ex.Message}");
-                Thread.Sleep(RECONNECT_INTERVAL);
+                Console.WriteLine($"Error processing task: {ex.Message}");
+                await Task.Delay(1000); // Пауза перед повтором
             }
         }
     }
 
-    public void Stop()
+    private async Task SaveResultAsync(string taskId, JObject result)
     {
-        _isRunning = false;
-        Dispose();
-    }
-
-    public void Dispose()
-    {
-        try
-        {
-            _channel?.Close();
-            _channel?.Dispose();
-            _connection?.Close();
-            _connection?.Dispose();
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error during disposal: {ex.Message}");
-        }
+        // Сохранение результата с установкой времени жизни
+        string resultJson = result.ToString();
+        await db.StringSetAsync(taskId, resultJson, resultExpiry);
     }
 }

@@ -1,62 +1,66 @@
-import pika
 import json
 import time
+import redis
 from moviepy.editor import VideoFileClip
-import os
+import uuid
 
 class Worker:
-    def __init__(self, queue_name, host='rabbitmq', process_function=None):
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=host))
-        self.channel = self.connection.channel()
+    def __init__(self, redis_host='localhost', redis_port=6379, queue_name='task_queue', result_expiry=86400, process_function=None):
+        self.redis = redis.StrictRedis(host=redis_host, port=redis_port, db=0)
         self.queue_name = queue_name
         self.process_function = process_function
+        self.result_expiry = result_expiry  # Время хранения результата в секундах (по умолчанию 1 день)
 
-        # Создаем очередь, которую будет слушать воркер
-        self.channel.queue_declare(queue=queue_name, durable=True)
+    def get_task(self):
+        """
+        Получаем задачу из очереди Redis.
+        Задачи добавляются в конец списка queue_name и обрабатываются по принципу FIFO.
+        """
+        _, task_data = self.redis.blpop(self.queue_name)
+        return json.loads(task_data)
 
-    def callback(self, ch, method, properties, body):
-        task = json.loads(body)
-        print(f"Received task: {task}")
-        ch.basic_ack(delivery_tag=method.delivery_tag)
-
-        # Обрабатываем задачу через функцию
-        if self.process_function:
-            result = self.process_function(task)
-            print(f"Processed task result: {result}")
-
-        self.channel.basic_publish(
-            exchange='',
-            routing_key='results',
-            body=json.dumps(result),
-            properties=pika.BasicProperties(
-                message_id=task['task_id'],
-                content_type='application/json',
-                delivery_mode=2  # Make the message persistent
-            )
-        )
+    def save_result(self, task_id, result):
+        """
+        Сохраняем результат в Redis с временным ограничением на хранение.
+        """
+        self.redis.set(task_id, json.dumps(result))
+        self.redis.expire(task_id, self.result_expiry)
 
     def start(self):
-        self.channel.basic_qos(prefetch_count=1)
-        self.channel.basic_consume(queue=self.queue_name, on_message_callback=self.callback)
-        print(f"Waiting for tasks in {self.queue_name}. To exit press CTRL+C")
-        self.channel.start_consuming()
+        print(f"Worker started and waiting for tasks in {self.queue_name}. To exit, press CTRL+C.")
+        while True:
+            try:
+                task = self.get_task()
+                print(f"Received task: {task}")
 
-    def close(self):
-        self.connection.close()
+                # Обрабатываем задачу через указанную функцию
+                if self.process_function:
+                    result = self.process_function(task)
+                    print(f"Processed task result: {result}")
 
-# Пример обработки строковых задач
-def process_string_task(task):
+                    # Сохраняем результат
+                    task_id = task.get('task_id', str(uuid.uuid4()))
+                    self.save_result(task_id, result)
+                    print(f"Result for task_id {task_id} saved to Redis.")
+
+            except Exception as e:
+                print(f"Error processing task: {e}")
+                time.sleep(1)  # В случае ошибки делаем небольшую паузу
+
+# Пример обработки видео
+def process_video_task(task):
     video = VideoFileClip(task['video'])
     duration = video.duration
     task['duration'] = duration
-    new_video = task["video"].replace('.mp4', '_processed.mp4')
-    video.write_videofile(new_video)
-    task["video"] = new_video
+
+    # Создаем имя нового видео файла и сохраняем его
+    new_video_path = task["video"].replace('.mp4', '_processed.mp4')
+    video.write_videofile(new_video_path)
+    task["video"] = new_video_path
     return task
 
-# Запуск воркеров
+# Запуск воркера
 if __name__ == '__main__':
-    string_worker = Worker('video_queue', process_function=process_string_task)
-
-    # Воркеры можно запускать в отдельных процессах
-    string_worker.start()
+    # Создаем воркера для обработки задач в очереди task_queue
+    video_worker = Worker(queue_name='task_queue', process_function=process_video_task)
+    video_worker.start()

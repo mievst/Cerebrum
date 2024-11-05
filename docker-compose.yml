@@ -1,17 +1,5 @@
 version: '3'
 services:
-  rabbitmq:
-    image: 'rabbitmq:3-management'
-    ports:
-      - "5672:5672"
-      - "15672:15672"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "status"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
   redis:
     image: redis:alpine
     ports:
@@ -42,12 +30,9 @@ services:
     volumes:
       - ./files:/files:rw  # Для хранения файлов
     depends_on:
-      rabbitmq:
-        condition: service_healthy
       redis:
         condition: service_healthy
     environment:
-      - RABBITMQ_HOST=rabbitmq
       - REDIS_HOST=redis
       - POSTGRES_HOST=postgres
       - POSTGRES_USER=myuser
@@ -59,7 +44,7 @@ services:
   python_worker_example:
     build: ./workers/python_worker_example
     depends_on:
-      rabbitmq:
+      redis:
         condition: service_healthy  # Проверка готовности RabbitMQ
     environment:
       - RABBITMQ_HOST=rabbitmq
@@ -72,7 +57,7 @@ services:
       context: ./workers/csharp_worker_example
       target: final
     depends_on:
-      rabbitmq:
+      redis:
         condition: service_healthy  # Проверка готовности RabbitMQ
     environment:
       - RABBITMQ_HOST=rabbitmq
@@ -85,7 +70,7 @@ services:
     volumes:
       - ./files:/files:rw  # Для хранения файлов
     depends_on:
-      rabbitmq:
+      redis:
         condition: service_healthy  # Проверка готовности RabbitMQ
     environment:
       - RABBITMQ_HOST=rabbitmq

@@ -5,22 +5,21 @@ namespace CsharpWorkerExample
 {
     internal class Program
     {
-        public static object processStringTask(object task)
+        public static async Task<JObject> processStringTask(JObject task)
         {
-            JObject? data = task as JObject;
-            var value = data["text"].ToString();
-            data["text"] = value.ToUpper();
-            return data;
+            var value = task["text"].ToString();
+            task["text"] = value.ToUpper();
+            return task;
         }
 
-        static void Main(string[] args)
+        public static async Task Main(string[] args)
         {
-            Console.WriteLine("Hello, World!");
+            var worker = new Worker(
+                queueName: "task_queue",
+                processFunction: processStringTask
+            );
 
-            using (var worker = new Worker("string_queue", processFunction: processStringTask))
-            {
-                worker.Start();
-            }
+            await worker.StartAsync();
         }
     }
 }
