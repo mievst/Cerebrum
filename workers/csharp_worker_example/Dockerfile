@@ -23,5 +23,19 @@ RUN dotnet publish "./CsharpWorkerExample.csproj" -c $BUILD_CONFIGURATION -o /ap
 # Этот этап используется в рабочей среде или при запуске из VS в обычном режиме (по умолчанию, когда конфигурация отладки не используется)
 FROM base AS final
 WORKDIR /app
+
+# Установка Python для поддержки Celery моста
+USER root
+RUN apt-get update && apt-get install -y python3 python3-pip && apt-get clean
+USER app
+
+# Установка Python зависимостей
+COPY requirements.txt ./
+RUN pip3 install --no-cache-dir --break-system-packages -r requirements.txt
+
 COPY --from=publish /app/publish .
-CMD ["dotnet", "CsharpWorkerExample.dll"]
+
+# Копируем Python мост
+COPY celery_bridge.py ./
+
+CMD ["python3", "-m", "celery", "-A", "celery_bridge", "worker", "--loglevel=info"]

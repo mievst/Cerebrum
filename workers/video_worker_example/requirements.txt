@@ -1,2 +1,4 @@
-pika
+celery==5.2.7
+redis==4.3.4
 moviepy
+pytest==7.2.0

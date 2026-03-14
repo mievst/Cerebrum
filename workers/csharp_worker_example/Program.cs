@@ -1,25 +1,50 @@
 ﻿using System.Xml.XPath;
 using Newtonsoft.Json.Linq;
+using System;
+using System.Threading.Tasks;
 
 namespace CsharpWorkerExample
 {
     internal class Program
     {
-        public static async Task<JObject> processStringTask(JObject task)
+        public static JObject processStringTask(JObject task)
         {
             var value = task["text"].ToString();
             task["text"] = value.ToUpper();
             return task;
         }
 
-        public static async Task Main(string[] args)
+        public static void Main(string[] args)
         {
-            var worker = new Worker(
-                queueName: "task_queue",
-                processFunction: processStringTask
-            );
+            // Проверяем, что переданы аргументы
+            if (args.Length == 0)
+            {
+                Console.WriteLine("No task data provided");
+                return;
+            }
 
-            await worker.StartAsync();
+            try
+            {
+                // Парсим JSON задачу из аргументов
+                string taskJson = args[0];
+                JObject task = JObject.Parse(taskJson);
+
+                // Обрабатываем задачу
+                JObject result = processStringTask(task);
+
+                // Выводим результат в stdout в формате JSON
+                Console.WriteLine(result.ToString());
+            }
+            catch (Exception ex)
+            {
+                // В случае ошибки выводим JSON с информацией об ошибке
+                JObject errorResult = new JObject
+                {
+                    ["status"] = "error",
+                    ["error"] = ex.Message
+                };
+                Console.WriteLine(errorResult.ToString());
+            }
         }
     }
 }

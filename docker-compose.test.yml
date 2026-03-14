@@ -12,7 +12,7 @@ services:
       retries: 5
 
   postgres:
-    image: postgres:18
+    image: postgres:13
     environment:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=mypassword
@@ -92,4 +92,30 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     restart: unless-stopped
     entrypoint: ["sh", "-c", "sleep 20 && celery -A celery_bridge worker --loglevel=info"]  # Запуск Celery воркера с Rust мостом
-    scale: 0  # Количество воркеров
+    scale: 1  # Количество воркеров
+
+  # Сервис для запуска тестов
+  test_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    depends_on:
+      - redis
+      - postgres
+      - middleware_service
+      - python_worker_example
+      - csharp_worker_example
+      - video_worker_example
+      - rust_worker_example
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - POSTGRES_HOST=postgres
+      - POSTGRES_USER=myuser
+      - POSTGRES_PASSWORD=mypassword
+      - POSTGRES_DB=mydb
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./workers:/app/workers:ro
+      - ./middleware:/app/middleware:ro
+    command: ["pytest", "-v"]

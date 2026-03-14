@@ -1,10 +1,10 @@
 from flask import Flask, request, jsonify, send_file
-import redis
 import json
 import uuid
 from threading import Thread
 import time
 import os
+from middleware.celery_app import celery_app, save_file_result
 
 
 UPLOAD_FOLDER = '/files'
@@ -36,19 +36,11 @@ def run_cleanup_scheduler(interval=3600):
 
 
 class MiddlewareService:
-    def __init__(self, redis_host='redis', redis_port=6379):
+    def __init__(self):
         self.app = Flask(__name__)
-        self.redis = redis.Redis(host=redis_host, port=redis_port, db=0)
 
         # Инициализация маршрутов
         self._setup_routes()
-
-    def save_result(self, task_id, result_data):
-        """
-        Сохраняет результат выполнения задачи в Redis
-        """
-        self.redis.set(task_id, json.dumps(result_data))
-        self.redis.expire(task_id, 86400)  # Хранение результата 1 день
 
     def _setup_routes(self):
         @self.app.route('/upload_file', methods=['POST'])
@@ -78,53 +70,45 @@ class MiddlewareService:
 
         @self.app.route('/submit_task', methods=['POST'])
         def submit_task():
-            task = request.json
+            task_data = request.json
             task_id = str(uuid.uuid4())
-            task["task_id"] = task_id
-            queue_name = task.get('queue', 'default_queue')
+            task_data["task_id"] = task_id
+
+            # Определяем тип задачи и отправляем в соответствующую очередь Celery
+            task_type = task_data.get('type', 'default')
 
             try:
-                # Добавление задачи в Redis очередь
-                self.redis.lpush(queue_name, json.dumps(task))
-                print(f"Task {task_id} added to queue {queue_name}")
+                # Отправка задачи в Celery
+                if task_type == 'math':
+                    result = celery_app.send_task('workers.math_task', args=[task_data], task_id=task_id)
+                elif task_type == 'video':
+                    result = celery_app.send_task('workers.video_task', args=[task_data], task_id=task_id)
+                else:
+                    result = celery_app.send_task('workers.default_task', args=[task_data], task_id=task_id)
+
+                print(f"Task {task_id} added to Celery queue")
             except Exception as e:
-                print(f"Error adding task to queue: {e}")
-                return jsonify({'error': 'Failed to add task to queue'}), 500
+                print(f"Error adding task to Celery queue: {e}")
+                return jsonify({'error': 'Failed to add task to Celery queue'}), 500
 
             return jsonify({'task_id': task_id}), 202
 
         @self.app.route('/get_result/<task_id>', methods=['GET'])
         def get_result(task_id):
-            result = self.redis.get(task_id)
-            if result:
-                return jsonify({'task_id': task_id, 'result': json.loads(result)}), 200
-            else:
-                return jsonify({'error': 'Result not ready or task not found'}), 404
-
-    def process_tasks(self, queue_name='default_queue'):
-        """
-        Обработчик задач из Redis очереди
-        """
-        while True:
+            # Попытка получить результат из Redis (для файловых задач)
+            result = None
             try:
-                task_data = self.redis.brpop(queue_name, timeout=0)
-                if task_data:
-                    _, task = task_data
-                    task = json.loads(task)
+                result = celery_app.AsyncResult(task_id)
+                if result.ready():
+                    return jsonify({'task_id': task_id, 'result': result.result}), 200
+                else:
+                    return jsonify({'task_id': task_id, 'status': 'processing'}), 202
+            except:
+                # Если задача не найдена в Celery, проверяем в Redis
+                pass
 
-                    # Обработка задачи
-                    task_id = task["task_id"]
-                    print(f"Processing task {task_id}")
-
-                    # Пример обработки задачи, результатом будет словарь
-                    result_data = {"task_id": task_id, "status": "completed"}
-
-                    # Сохранение результата в Redis
-                    self.save_result(task_id, result_data)
-                    print(f"Task {task_id} completed and result saved")
-            except Exception as e:
-                print(f"Error processing task: {e}")
-                time.sleep(1)
+            # Если результат не найден в Celery, возвращаем ошибку
+            return jsonify({'error': 'Result not ready or task not found'}), 404
 
     def run_flask_app(self):
         self.app.run(host='0.0.0.0', port=5000)
@@ -132,10 +116,7 @@ class MiddlewareService:
     def run(self):
         print("Starting Middleware Service...")
         Thread(target=self.run_flask_app).start()
-        print("Starting Task Processor...")
-
-        # Запуск обработчика задач для разных очередей
-        Thread(target=self.process_tasks, args=('default_queue',)).start()
+        print("Middleware Service started successfully")
 
 
 if __name__ == '__main__':

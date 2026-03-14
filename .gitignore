@@ -42,3 +42,6 @@ _TeamCity*
 ## Ignore other IDEs
 *.idea/
 *. Rider/
+.qodo
+
+.fake
