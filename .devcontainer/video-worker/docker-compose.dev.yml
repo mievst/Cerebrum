@@ -1,0 +1,16 @@
+version: '3'
+services:
+  video_worker_example:
+    build:
+      context: ./workers/video_worker_example
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./workers/video_worker_example:/app
+      - ./files:/files:rw
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      - cerebrum-net
+
+networks:
+  cerebrum-net:
+    driver: bridge

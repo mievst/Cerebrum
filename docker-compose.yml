@@ -2,14 +2,14 @@ version: '3'
 services:
   redis:
     image: redis:alpine
-    ports:
-      - "6379:6379"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 5
+    networks:
+      - cerebrum-net
 
   postgres:
     image: postgres:18
@@ -17,18 +17,18 @@ services:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=mydb
-    ports:
-      - "5432:5432"
     restart: unless-stopped
     volumes:
-      - ./pgdata:/var/lib/postgresql/data
+      - ./pgdata:/var/lib/postgresql
+    networks:
+      - cerebrum-net
 
-  middleware_service:
-    build: ./middleware
+  producer:
+    build: ./producer
     ports:
-      - "5000:5000"
+      - "5050:5050"
     volumes:
-      - ./files:/files:rw  # Для хранения файлов
+      - ./files:/files:rw
     depends_on:
       redis:
         condition: service_healthy
@@ -40,7 +40,8 @@ services:
       - POSTGRES_PASSWORD=mypassword
       - POSTGRES_DB=mydb
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "sleep 20 && python service.py"]  # Задержка перед запуском
+    networks:
+      - cerebrum-net
 
   python_worker_example:
     build: ./workers/python_worker_example
@@ -51,27 +52,15 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "sleep 20 && celery -A worker worker --loglevel=info"]  # Запуск Celery воркера
-    scale: 1  # Количество воркеров
-
-  csharp_worker_example:
-    build:
-      context: ./workers/csharp_worker_example
-      target: final
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    restart: unless-stopped
-    entrypoint: ["sh", "-c", "sleep 20 && celery -A celery_bridge worker --loglevel=info"]  # Запуск Celery воркера с C# мостом
-    scale: 1  # Количество воркеров
+    entrypoint: ["sh", "-c", "sleep 20 && celery -A worker worker --loglevel=info"]
+    scale: 1
+    networks:
+      - cerebrum-net
 
   video_worker_example:
     build: ./workers/video_worker_example
     volumes:
-      - ./files:/files:rw  # Для хранения файлов
+      - ./files:/files:rw
     depends_on:
       redis:
         condition: service_healthy
@@ -79,17 +68,11 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
     restart: unless-stopped
-    entrypoint: ["sh", "-c", "sleep 20 && celery -A worker worker --loglevel=info"]  # Запуск Celery воркера
-    scale: 1  # Количество воркеров
+    entrypoint: ["sh", "-c", "sleep 20 && celery -A worker worker --loglevel=info"]
+    scale: 1
+    networks:
+      - cerebrum-net
 
-  rust_worker_example:
-    build: ./workers/rust_worker_example
-    depends_on:
-      redis:
-        condition: service_healthy
-    environment:
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-    restart: unless-stopped
-    entrypoint: ["sh", "-c", "sleep 20 && celery -A celery_bridge worker --loglevel=info"]  # Запуск Celery воркера с Rust мостом
-    scale: 0  # Количество воркеров
+networks:
+  cerebrum-net:
+    driver: bridge

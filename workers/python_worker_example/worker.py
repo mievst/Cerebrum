@@ -5,7 +5,7 @@ import os
 
 # Конфигурация Celery
 CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://redis:6379/0')
-CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://redis:6379/1')
 
 # Создание Celery приложения
 celery_app = Celery('python_worker', broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)

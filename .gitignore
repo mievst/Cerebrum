@@ -45,3 +45,7 @@ _TeamCity*
 .qodo
 
 .fake
+
+pgdata/
+
+*.venv

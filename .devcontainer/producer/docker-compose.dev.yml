@@ -1,0 +1,17 @@
+version: '3'
+services:
+  producer:
+    build:
+      context: ./producer
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./producer:/app
+      - ./files:/files:rw
+    entrypoint: ["sleep", "infinity"]
+    command: []
+    networks:
+      - cerebrum-net
+
+networks:
+  cerebrum-net:
+    driver: bridge

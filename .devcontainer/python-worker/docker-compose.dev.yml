@@ -1,0 +1,15 @@
+version: '3'
+services:
+  python_worker_example:
+    build:
+      context: ./workers/python_worker_example
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./workers/python_worker_example:/app
+    entrypoint: ["sleep", "infinity"]
+    networks:
+      - cerebrum-net
+
+networks:
+  cerebrum-net:
+    driver: bridge

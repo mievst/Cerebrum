@@ -1,0 +1,9 @@
+[project]
+name = "video-worker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "celery>=5.2.7",
+    "redis>=4.3.4",
+    "moviepy",
+]
